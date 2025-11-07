@@ -1,19 +1,10 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.core.db import Base, engine
-from app.routes import auth_router, precheck_router, chat_router
-
-# --- 모델 메타데이터 등록용 import ---
+from app.routes import auth, precheck, chat, upload
 from app.models import user as user_model
-# 다른 모델 코드와 병합 예정...
-# from app.models import chat_thread as chat_thread_model
-# from app.models import chat_message as chat_message_model
-# from app.models import chat_attachment as chat_attachment_model
-# from app.models import analysis_snapshot as analysis_snapshot_model
-# from app.models import audit_log as audit_log_model
+from app.models import Base
 
-# --- 라우터 ---
-from app.routes import auth, precheck, chat
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,3 +26,9 @@ def health():
 app.include_router(auth.router)
 app.include_router(precheck.router)
 app.include_router(chat.router)
+app.include_router(upload.router)
+
+@app.on_event("startup")
+def on_startup():
+    # models/__init__.py에서 모든 모델이 이미 import되어 메타데이터에 등록됨
+    Base.metadata.create_all(bind=engine)

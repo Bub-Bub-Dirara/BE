@@ -10,7 +10,7 @@ class ChannelType(str, enum.Enum):
 class ChatThread(Base):
     __tablename__ = "chat_thread"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("user.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
     channel = Column(Enum(ChannelType), nullable=False)
     title = Column(String, nullable=True)
     status = Column(String, default="OPEN")  # OPEN/CLOSED/ARCHIVED
