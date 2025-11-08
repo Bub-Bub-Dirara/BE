@@ -1,51 +1,116 @@
+from __future__ import annotations
+
+from typing import Optional
+import urllib.parse
 import os
-import uuid
+
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-from .config import settings
+from botocore.client import Config
+from botocore.exceptions import ClientError
+
+from app.core.config import settings
+
 
 class S3Client:
-    def __init__(self):
+    """
+    Thin wrapper around boto3 S3 client.
+    - 업로드는 private로 저장
+    - 다운로드는 presigned URL(get_object)로 제공
+    - 외부에서는 프라이빗 속성(_session/_client)에 접근하지 말고 공개 메서드만 사용
+    """
+
+    def __init__(self) -> None:
         if not settings.s3_enabled:
-            self.client = None
+            # 환경 미설정 시 안전하게 비활성화
+            self._session = None
+            self._client = None
             return
-        self.client = boto3.client(
+
+        # 세션 & 클라이언트 준비
+        self._session = boto3.session.Session(
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.aws_region,
+        )
+        # s3v4 서명 사용
+        self._client = self._session.client(
             "s3",
-            region_name=settings.AWS_REGION,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            config=Config(signature_version="s3v4"),
+            region_name=settings.aws_region,
         )
 
-    def upload_bytes(self, data: bytes, key: str, content_type: str) -> str:
-        if not self.client:
-            raise RuntimeError("S3 not configured")
-        try:
-            self.client.put_object(
-                Bucket=settings.S3_BUCKET,
-                Key=key,
-                Body=data,
-                ContentType=content_type,
-                ACL="private",  # 필요 시 'public-read'
-            )
-        except (BotoCoreError, ClientError) as e:
-            raise RuntimeError(f"S3 upload failed: {e}")
-        # 퍼블릭 URL 정책을 쓰지 않는다면 presigned URL을 쓰도록
-        return f"{settings.S3_PUBLIC_BASE}/{key}" if settings.S3_PUBLIC_BASE else key
+    # -----------------------------
+    # Utilities
+    # -----------------------------
+    @staticmethod
+    def build_s3_key(user_id: int, category: str, original_filename: str) -> str:
+        """user/{user_id}/{category}/{random}.ext 형태의 키 생성"""
+        from secrets import token_hex
 
-    def generate_presigned_url(self, key: str, expires: int = 3600) -> str:
-        if not self.client:
-            raise RuntimeError("S3 not configured")
-        try:
-            return self.client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": settings.S3_BUCKET, "Key": key},
-                ExpiresIn=expires,
+        name, ext = os.path.splitext(original_filename)
+        return f"user/{user_id}/{category}/{token_hex(16)}{ext.lower()}"
+
+    # -----------------------------
+    # Upload
+    # -----------------------------
+    def upload_bytes(self, data: bytes, key: str, content_type: str) -> Optional[str]:
+        """
+        파일 바이트를 S3에 업로드. 성공 시 public base URL(설정된 경우) 반환.
+        실제 다운로드는 presigned URL 사용 권장.
+        """
+        if not self._client:
+            raise RuntimeError("S3 is not enabled/configured")
+
+        self._client.put_object(
+            Bucket=settings.s3_bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            ACL="private",
+        )
+
+        if settings.s3_public_base:
+            return f"{settings.s3_public_base}/{urllib.parse.quote(key)}"
+        return None
+
+    # -----------------------------
+    # Presign (download)
+    # -----------------------------
+    def presign_get_url(self, key: str, expires: int = 600) -> str:
+        """
+        get_object용 presigned URL 생성 (기본 10분)
+        """
+        if not self._client:
+            raise RuntimeError("S3 is not enabled/configured")
+
+        return self._client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": settings.s3_bucket, "Key": key},
+            ExpiresIn=expires,
+        )
+
+    def generate_presigned_url(self, key: str, expires_in: int = 600) -> str:
+        return self.presign_get_url(key=key, expires=expires_in)
+
+    # -----------------------------
+    # STS WhoAmI (health check 용)
+    # -----------------------------
+    def whoami(self) -> dict:
+        """
+        현재 자격 증명 확인 (외부에서 _session에 직접 접근하지 말고 이 메서드 사용)
+        """
+        if self._session:
+            sts = self._session.client("sts", region_name=settings.aws_region)
+        else:
+            # s3 비활성 상태에서도 .env 자격으로 확인 시도
+            sts = boto3.client(
+                "sts",
+                region_name=settings.aws_region,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
             )
-        except (BotoCoreError, ClientError) as e:
-            raise RuntimeError(f"S3 presign failed: {e}")
+        return sts.get_caller_identity()
 
 s3 = S3Client()
 
-def build_s3_key(user_id: int, category: str, filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    return f"users/{user_id}/{category}/{uuid.uuid4().hex}{ext}"
+build_s3_key = S3Client.build_s3_key

@@ -5,6 +5,10 @@ from app.routes import auth, precheck, chat, upload
 from app.models import user as user_model
 from app.models import Base
 
+import logging
+from app.core.config import settings
+
+logger = logging.getLogger("uvicorn")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,3 +36,7 @@ app.include_router(upload.router)
 def on_startup():
     # models/__init__.py에서 모든 모델이 이미 import되어 메타데이터에 등록됨
     Base.metadata.create_all(bind=engine)
+    logger.info(
+        f"S3 enabled={settings.s3_enabled} "
+        f"region={settings.aws_region} bucket={settings.s3_bucket}"
+    )

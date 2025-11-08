@@ -1,9 +1,11 @@
-# app/routes/upload.py
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.responses import FileResponse
 import os
+import boto3
 
+from botocore.exceptions import ClientError
+from app.core import s3 as s3core
 from app.core.config import settings
 from app.core.s3 import s3, build_s3_key
 from app.models.evidence_file import EvidenceFile, EvidenceCategory
@@ -169,3 +171,23 @@ def download_local_file(
         media_type=entity.content_type,
         filename=entity.original_filename,
     )
+
+@router.get("/api/files/_s3/health")
+def s3_health():
+    try:
+        # STS 클라이언트 생성(동일한 .env 자격증명 사용)
+        sts = boto3.client(
+            "sts",
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+        )
+        ident = sts.get_caller_identity()
+        return {
+            "ok": True,
+            "account": ident.get("Account"),
+            "arn": ident.get("Arn"),
+            "user_id": ident.get("UserId"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"S3/STS check failed: {e}")
