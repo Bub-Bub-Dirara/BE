@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db import get_db
+from app.core.db import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserLogin, UserOut, Token
 from app.core.security import get_password_hash, verify_password, create_access_token
