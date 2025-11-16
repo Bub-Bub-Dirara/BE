@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from precedent.app.api import ai_router as _ai_router
 from be.app.routes import router as be_router
 
+from be.app.core.db import Base, engine
+from be.app.models import user
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -20,6 +23,10 @@ app.add_middleware(
     allow_methods=["*"],      # OPTIONS(프리플라이트) 포함
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 ai_prefix = getattr(_ai_router, "prefix", "") or ""
 if ai_prefix.strip():
